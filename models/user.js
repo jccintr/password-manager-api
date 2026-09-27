@@ -11,9 +11,9 @@ const userSchema = new mongoose.Schema(
     // para derivar a vaultKey (não são secretos)
     kdfSalt: { type: String, required: true },
     kdfParams: {
-      algorithm: { type: String, default: 'argon2id' }, // ou 'pbkdf2'
+      algorithm: { type: String, default: 'argon2id' },
       iterations: { type: Number, default: 3 },
-      memory: { type: Number, default: 65536 }, // KiB (argon2)
+      memory: { type: Number, default: 65536 },
       parallelism: { type: Number, default: 1 },
     },
   },

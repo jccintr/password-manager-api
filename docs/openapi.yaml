@@ -1,22 +1,20 @@
 openapi: 3.0.3
 info:
-  title: Simple Todo API
+  title: Password Manager API
   description: |
-    API REST para gerenciamento de tarefas (todos) organizadas por categorias.
+    API de cofre de senhas com criptografia no cliente.
+
+    O servidor armazena apenas **blobs cifrados** (`ciphertext` + `nonce`).
+    A senha mestra e a `vaultKey` nunca trafegam em claro nem são persistidas.
 
     ## Autenticação
-    Endpoints protegidos exigem header:
     ```
     Authorization: Bearer <token>
     ```
-    O token é obtido em `POST /auth/login`.
 
-    ## Cadastro
-    Ao registrar um usuário, a API cria automaticamente três categorias padrão:
-    **Pessoal**, **Trabalho** e **Compras**.
-
-    ## Documentação interativa
-    Swagger UI disponível em `/api/docs`.
+    ## KDF
+    No registro o cliente envia `kdfSalt`. No login a API devolve `kdfSalt` e
+    `kdfParams` para o app rederivar a chave localmente.
   version: 1.0.0
 
 servers:
@@ -25,11 +23,9 @@ servers:
 
 tags:
   - name: Auth
-    description: Registro, login e validação de token
-  - name: Categories
-    description: CRUD de categorias do usuário autenticado
-  - name: Todos
-    description: CRUD de tarefas vinculadas a categorias
+    description: Registro, login e perfil
+  - name: VaultItems
+    description: Itens cifrados do cofre
 
 components:
   securitySchemes:
@@ -44,7 +40,6 @@ components:
       properties:
         error:
           type: string
-          example: Mensagem de erro
 
     ValidationError:
       type: object
@@ -59,36 +54,40 @@ components:
             properties:
               field:
                 type: string
-                example: name
               message:
                 type: string
-                example: Nome é obrigatório
 
-    MessageResponse:
+    KdfParams:
       type: object
       properties:
-        message:
+        algorithm:
           type: string
+          example: argon2id
+        iterations:
+          type: number
+          example: 3
+        memory:
+          type: number
+          example: 65536
+        parallelism:
+          type: number
+          example: 1
 
     User:
       type: object
       properties:
         _id:
           type: string
-          example: 507f1f77bcf86cd799439011
         name:
           type: string
-          example: João Usuário
         email:
           type: string
-          format: email
-          example: joao@test.com
         active:
           type: boolean
-          example: true
-        isAdmin:
-          type: boolean
-          example: false
+        kdfSalt:
+          type: string
+        kdfParams:
+          $ref: '#/components/schemas/KdfParams'
         createdAt:
           type: string
           format: date-time
@@ -98,20 +97,23 @@ components:
 
     UserRegister:
       type: object
-      required: [name, email, password]
+      required: [name, email, password, kdfSalt]
       properties:
         name:
           type: string
           minLength: 3
-          example: João Usuário
         email:
           type: string
           format: email
-          example: joao@test.com
         password:
           type: string
           minLength: 3
-          example: "123456"
+          description: Senha de autenticação (hash no servidor)
+        kdfSalt:
+          type: string
+          description: Salt gerado no cliente para derivar a vaultKey
+        kdfParams:
+          $ref: '#/components/schemas/KdfParams'
 
     UserLogin:
       type: object
@@ -120,10 +122,8 @@ components:
         email:
           type: string
           format: email
-          example: joao@test.com
         password:
           type: string
-          example: "123456"
 
     UserLoginResponse:
       allOf:
@@ -132,22 +132,23 @@ components:
           properties:
             token:
               type: string
-              description: JWT para autenticação
-              example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
-    Category:
+    VaultItem:
       type: object
       properties:
         _id:
           type: string
-          example: 507f1f77bcf86cd799439012
         user:
           type: string
-          description: ID do usuário dono (presente no create/update; omitido no list)
-          example: 507f1f77bcf86cd799439011
-        name:
+        ciphertext:
           type: string
-          example: Pessoal
+          description: Payload AES-GCM cifrado (base64/hex)
+        nonce:
+          type: string
+          description: IV do AES-GCM
+        version:
+          type: integer
+          example: 1
         createdAt:
           type: string
           format: date-time
@@ -155,100 +156,34 @@ components:
           type: string
           format: date-time
 
-    CategoryListItem:
+    VaultItemCreate:
       type: object
+      required: [ciphertext, nonce]
       properties:
-        _id:
+        ciphertext:
           type: string
-        name:
+        nonce:
           type: string
+        version:
+          type: integer
+          minimum: 1
 
-    CategoryInput:
-      type: object
-      required: [name]
-      properties:
-        name:
-          type: string
-          example: Estudos
-
-    Todo:
+    VaultItemUpdate:
       type: object
       properties:
-        _id:
+        ciphertext:
           type: string
-          example: 507f1f77bcf86cd799439013
-        user:
+        nonce:
           type: string
-          example: 507f1f77bcf86cd799439011
-        category:
-          type: string
-          example: 507f1f77bcf86cd799439012
-        description:
-          type: string
-          example: Comprar pão
-        done:
-          type: boolean
-          example: false
-        priority:
-          type: string
-          enum: [low, medium, high]
-          example: medium
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
-
-    TodoCreate:
-      type: object
-      required: [description, categoryId]
-      properties:
-        description:
-          type: string
-          minLength: 3
-          example: Comprar pão
-        categoryId:
-          type: string
-          description: ObjectId da categoria
-          example: 507f1f77bcf86cd799439012
-        priority:
-          type: string
-          enum: [low, medium, high]
-          default: medium
-          example: high
-
-    TodoUpdate:
-      type: object
-      description: Todos os campos são opcionais (update parcial)
-      properties:
-        description:
-          type: string
-          minLength: 3
-          example: Enviar relatório
-        done:
-          type: boolean
-          example: true
-        priority:
-          type: string
-          enum: [low, medium, high]
-          example: high
-        categoryId:
-          type: string
-          description: ObjectId da nova categoria (deve pertencer ao usuário)
-          example: 507f1f77bcf86cd799439014
+        version:
+          type: integer
+          minimum: 1
 
 paths:
-  # =====================
-  # AUTH
-  # =====================
   /auth/register:
     post:
       tags: [Auth]
       summary: Cadastrar usuário
-      description: |
-        Cria a conta e gera automaticamente as categorias padrão:
-        Pessoal, Trabalho e Compras.
       requestBody:
         required: true
         content:
@@ -257,42 +192,17 @@ paths:
               $ref: '#/components/schemas/UserRegister'
       responses:
         '201':
-          description: Conta criada com sucesso
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-                    example: Conta criada com sucesso.
-                  user:
-                    $ref: '#/components/schemas/User'
+          description: Conta criada
         '400':
           description: Email já cadastrado
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              example:
-                error: Email já cadastrado.
         '422':
           description: Dados inválidos
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ValidationError'
-        '500':
-          description: Erro interno do servidor
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
 
   /auth/login:
     post:
       tags: [Auth]
       summary: Login
+      description: Retorna token JWT, kdfSalt e kdfParams.
       requestBody:
         required: true
         content:
@@ -301,40 +211,20 @@ paths:
               $ref: '#/components/schemas/UserLogin'
       responses:
         '200':
-          description: Login realizado — retorna dados do usuário e token JWT
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserLoginResponse'
         '400':
-          description: Email ou senha inválidos
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              example:
-                error: Email ou senha inválidos.
+          description: Credenciais inválidas
         '403':
           description: Conta desativada
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              example:
-                error: Conta desativada.
-        '422':
-          description: Dados inválidos
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ValidationError'
-        '500':
-          description: Erro interno do servidor
 
   /auth/me:
     get:
       tags: [Auth]
-      summary: Dados do usuário autenticado
+      summary: Perfil autenticado
       security:
         - bearerAuth: []
       responses:
@@ -346,342 +236,83 @@ paths:
                 $ref: '#/components/schemas/User'
         '401':
           description: Não autorizado
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              example:
-                error: Não autorizado
         '403':
           description: Conta desativada
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              example:
-                error: Conta desativada.
-        '404':
-          description: Usuário não encontrado
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              example:
-                error: Usuário não encontrado.
-        '500':
-          description: Erro interno do servidor
 
-  # =====================
-  # CATEGORIES
-  # =====================
-  /categories:
-    get:
-      tags: [Categories]
-      summary: Listar categorias do usuário
-      description: Retorna apenas `_id` e `name`, ordenadas por nome (A–Z).
-      security:
-        - bearerAuth: []
-      responses:
-        '200':
-          description: Lista de categorias
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/CategoryListItem'
-        '401':
-          description: Não autorizado
-        '403':
-          description: Conta desativada
-        '404':
-          description: Usuário não encontrado
-        '500':
-          description: Erro interno do servidor
-
-    post:
-      tags: [Categories]
-      summary: Criar categoria
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CategoryInput'
-      responses:
-        '201':
-          description: Categoria criada
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Category'
-        '401':
-          description: Não autorizado
-        '403':
-          description: Conta desativada
-        '404':
-          description: Usuário não encontrado
-        '422':
-          description: Nome obrigatório
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ValidationError'
-        '500':
-          description: Erro interno do servidor
-
-  /categories/{id}:
-    put:
-      tags: [Categories]
-      summary: Atualizar nome da categoria
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-          description: ObjectId da categoria
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CategoryInput'
-      responses:
-        '200':
-          description: Categoria atualizada
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Category'
-        '401':
-          description: Não autorizado
-        '403':
-          description: Conta desativada ou sem permissão
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              examples:
-                inactive:
-                  value:
-                    error: Conta desativada.
-                forbidden:
-                  value:
-                    error: Você não tem permissão para editar esta categoria.
-        '404':
-          description: Categoria ou usuário não encontrado
-        '422':
-          description: Nome obrigatório
-        '500':
-          description: Erro interno do servidor
-
-    delete:
-      tags: [Categories]
-      summary: Excluir categoria
-      description: |
-        Remove a categoria se ela **não** tiver tarefas vinculadas.
-        Se existirem todos na categoria, retorna **409** e não exclui nada.
-        Não há exclusão em cascata.
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-          description: ObjectId da categoria
-      responses:
-        '204':
-          description: Categoria excluída (sem body)
-        '401':
-          description: Não autorizado
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              example:
-                error: Não autorizado
-        '403':
-          description: Conta desativada ou sem permissão
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              examples:
-                inactive:
-                  value:
-                    error: Conta desativada.
-                forbidden:
-                  value:
-                    error: Você não tem permissão para excluir esta categoria.
-        '404':
-          description: Categoria ou usuário não encontrado
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              example:
-                error: Categoria não encontrada.
-        '409':
-          description: Categoria possui tarefas — exclusão bloqueada
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              example:
-                error: Categoria possui tarefas. Remova ou mova as tarefas antes de excluir.
-        '500':
-          description: Erro interno do servidor
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-
-  # =====================
-  # TODOS
-  # =====================
-  /todos:
-    post:
-      tags: [Todos]
-      summary: Criar todo
-      security:
-        - bearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TodoCreate'
-      responses:
-        '201':
-          description: Todo criado
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Todo'
-        '401':
-          description: Não autorizado
-        '403':
-          description: Conta desativada
-        '404':
-          description: Usuário ou categoria não encontrado
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              examples:
-                category:
-                  value:
-                    error: Categoria não encontrada.
-        '422':
-          description: Dados inválidos (descrição, prioridade ou categoryId)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ValidationError'
-        '500':
-          description: Erro interno do servidor
-
-  /todos/category/{categoryId}:
-    get:
-      tags: [Todos]
-      summary: Listar todos de uma categoria
-      description: |
-        Retorna apenas os todos do usuário autenticado na categoria informada,
-        ordenados por `createdAt` decrescente.
-      security:
-        - bearerAuth: []
-      parameters:
-        - name: categoryId
-          in: path
-          required: true
-          schema:
-            type: string
-          description: ObjectId da categoria
-      responses:
-        '200':
-          description: Lista de todos
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Todo'
-        '401':
-          description: Não autorizado
-        '403':
-          description: Conta desativada
-        '404':
-          description: Categoria ou usuário não encontrado
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              example:
-                error: Categoria não encontrada.
-        '500':
-          description: Erro interno do servidor
-
-  /todos/{id}:
     patch:
-      tags: [Todos]
-      summary: Atualizar todo (parcial)
-      description: |
-        Atualiza apenas os campos enviados: `description`, `done`, `priority` e/ou `categoryId`.
-        Se `categoryId` for informado, a categoria deve existir e pertencer ao usuário.
+      tags: [Auth]
+      summary: Atualizar nome
       security:
         - bearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-          description: ObjectId do todo
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TodoUpdate'
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 3
       responses:
         '200':
-          description: Todo atualizado
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Todo'
+          description: Perfil atualizado
         '401':
           description: Não autorizado
         '403':
-          description: Conta desativada, todo de outro usuário ou categoria de outro usuário
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              examples:
-                todo:
-                  value:
-                    error: Você não tem permissão para editar este todo.
-                category:
-                  value:
-                    error: Você não tem permissão para usar esta categoria.
-        '404':
-          description: Todo, categoria ou usuário não encontrado
+          description: Conta desativada
         '422':
           description: Dados inválidos
-        '500':
-          description: Erro interno do servidor
 
-    delete:
-      tags: [Todos]
-      summary: Excluir todo
+  /vault-items:
+    get:
+      tags: [VaultItems]
+      summary: Listar itens do cofre
+      description: Retorna blobs cifrados do usuário. A busca/descriptografia é no cliente.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Lista de itens
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/VaultItem'
+        '401':
+          description: Não autorizado
+        '403':
+          description: Conta desativada
+
+    post:
+      tags: [VaultItems]
+      summary: Criar item cifrado
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultItemCreate'
+      responses:
+        '201':
+          description: Item criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VaultItem'
+        '401':
+          description: Não autorizado
+        '422':
+          description: Dados inválidos
+
+  /vault-items/{id}:
+    patch:
+      tags: [VaultItems]
+      summary: Atualizar item cifrado
       security:
         - bearerAuth: []
       parameters:
@@ -690,27 +321,38 @@ paths:
           required: true
           schema:
             type: string
-          description: ObjectId do todo
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VaultItemUpdate'
       responses:
-        '204':
-          description: Todo excluído (sem body)
+        '200':
+          description: Item atualizado
         '401':
           description: Não autorizado
         '403':
-          description: Conta desativada ou sem permissão
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              example:
-                error: Você não tem permissão para excluir este todo.
+          description: Sem permissão
         '404':
-          description: Todo ou usuário não encontrado
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-              example:
-                error: Todo não encontrado.
-        '500':
-          description: Erro interno do servidor
+          description: Item não encontrado
+
+    delete:
+      tags: [VaultItems]
+      summary: Excluir item
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Excluído
+        '401':
+          description: Não autorizado
+        '403':
+          description: Sem permissão
+        '404':
+          description: Item não encontrado

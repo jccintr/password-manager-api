@@ -14,7 +14,13 @@ export const registerValidator = [
   body('password')
     .notEmpty().withMessage('Senha é obrigatória')
     .isLength({ min: 3 }).withMessage('Senha deve ter pelo menos 3 caracteres'),
-  
+
+  body('kdfSalt')
+    .exists({ checkFalsy: true })
+    .withMessage('kdfSalt é obrigatório')
+    .bail()
+    .isString()
+    .withMessage('kdfSalt inválido'),
 ];
 
 export const loginValidator = [
